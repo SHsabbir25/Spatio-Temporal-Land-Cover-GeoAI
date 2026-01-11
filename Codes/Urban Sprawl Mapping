@@ -1,0 +1,17 @@
+var roi = 
+    /* color: #d63000 */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Geometry.Polygon(
+        [[[106.54446515807672, -5.992263271068549],
+          [106.54446515807672, -6.565583078390089],
+          [107.12399396667047, -6.565583078390089],
+          [107.12399396667047, -5.992263271068549]]], null, false),
+    l5 = ee.ImageCollection("LANDSAT/LT05/C02/T1_L2"),
+    l8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2"),
+    l9 = ee.ImageCollection("LANDSAT/LC09/C02/T1_L2"),
+    l7 = ee.ImageCollection("LANDSAT/LE07/C02/T1_L2"),
+    l4 = ee.ImageCollection("LANDSAT/LT04/C02/T1_L2");
