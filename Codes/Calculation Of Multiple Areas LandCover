@@ -1,0 +1,103 @@
+// Loads the 'admin2' layer and zoom to your region of interest
+// Switch to the Inspector tab and click on a polygon
+// Expand the '▶ Feature ...' section and note the value
+// for ADM0_NAME, ADM1_NAME and ADM2_NAME. Replace the value below with it.
+var admin2 = ee.FeatureCollection("FAO/GAUL/2015/level2"),
+    worldcover = ee.ImageCollection("ESA/WorldCover/v100");
+var ADM0_NAME = 'India';
+var ADM1_NAME = 'Rajasthan';
+var ADM2_NAME = 'Udaipur';
+
+// Load the ESA WorldCover data
+var filtered = worldcover
+  .filter(ee.Filter.date('2020-01-01', '2021-01-01'));
+var classification = ee.Image(filtered.first());
+print(classification);
+
+// Extract the class names and values from the image properties
+var classNames = classification.get('Map_class_names');
+var classValues = classification.get('Map_class_values');
+
+var classValues = ee.List(classValues).map(function(item) {
+  return ee.Number(item).format('%02d');
+});
+var classDict = ee.Dictionary.fromLists(classValues, classNames);
+print(classDict);
+
+// Calculate Class Areas for a multiple regions
+
+// Calculate Area for Multiple Districts
+var selected = admin2
+  .filter(ee.Filter.eq('ADM0_NAME', ADM0_NAME))
+  .filter(ee.Filter.eq('ADM1_NAME', ADM1_NAME));
+
+// For visualization landcover in the selected multiple regions
+
+var geometry=selected.geometry();
+Map.addLayer(geometry);
+// Extract classification according to multiple area from(Load the ESA WorldCover data)
+var clipped = classification.clip(geometry);
+Map.addLayer(clipped, {}, 'WorldCover Classification');
+
+// Zoom to selected regions
+Map.centerObject(selected,8);
+Map.addLayer(selected, {},'Selected Regions');
+
+// Now Area calculation
+var calculateClassArea = function(feature) {
+
+    var areas = ee.Image.pixelArea().addBands(classification)
+    .reduceRegion({
+      reducer: ee.Reducer.sum().group({
+      groupField: 1,
+      groupName: 'class',
+    }),
+    geometry: feature.geometry(),
+    scale: 10,
+    maxPixels: 1e10
+    });
+    var classAreas = ee.List(areas.get('groups'));
+    var classAreaLists = classAreas.map(function(item) {
+      var areaDict = ee.Dictionary(item);
+      var classNumber = ee.Number(
+        areaDict.get('class')).format();
+      var area = ee.Number(
+        areaDict.get('sum')).divide(1e6).round();
+      return ee.List([classDict.get(classNumber), area]);
+    });
+  
+    var result = ee.Dictionary(classAreaLists.flatten());
+    var district = feature.get('ADM2_NAME');
+    return ee.Feature(
+      feature.geometry(),
+      result.set('district', district));
+};
+
+var admin2Areas = selected.map(calculateClassArea);
+print(admin2Areas.first());
+
+var outputFields = ee.List(['district'])
+  .cat(classDict.values()).getInfo();
+print(outputFields);
+ 
+Export.table.toDrive({
+    collection: admin2Areas,
+    description: 'Admin2_Class_Areas',
+    folder: 'earthengine',
+    fileNamePrefix: 'class_area_by_admin1_Rajasthan',
+    fileFormat: 'CSV',
+    selectors: outputFields
+    });
+
+/* the export function is the client side function.if you refer to the user
+guide article on client versus server you'll understand which functions are
+server-side functions and which functions are client-side and you can't
+mix both of them so here, we have this output fields which is a server side
+object which is an ee.list object and we want to use them in export
+function so we need to convert this into a regular javascript list and that is
+done by this function called get info. getinfo is not recommended for you
+know converting large objects into client-side. it can it's asynchronous
+that means it's synchronous that means your code will hang if you try to do
+this all for a value that is very large. but for a small kind of list like this
+it is okay to use get info. but if you have a lot of get infos in your code
+your code will run very slowly your browser */
