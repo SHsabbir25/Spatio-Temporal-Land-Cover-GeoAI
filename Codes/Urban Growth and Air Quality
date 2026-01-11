@@ -1,0 +1,104 @@
+// Analyzing Urban Growth and Its Impact on Air Quality with MODIS Data in Google Earth Engine
+
+// 1. Define the study area using coordinates for a polygon ;
+var admin = ee.FeatureCollection("FAO/GAUL_SIMPLIFIED_500m/2015/level2");
+var studyArea=admin.filter(ee.Filter.eq('ADM2_NAME','Dhaka'));
+Map.addLayer(studyArea,{'color':'red'},'Study Area');
+// 3. Center the map on the study area
+Map.centerObject(studyArea, 9);
+
+// 4. Step 1: Analyzing Urban Growth using MODIS Land Cover (LC_Type1)
+// Load the MODIS land cover dataset
+var urbanCover = ee.ImageCollection("MODIS/061/MCD12Q1")
+  .select('LC_Type1')
+  .map(function(image) {
+    var urbanClass = image.eq(13); // Urban area is represented by class 13
+    var maskedUrban = urbanClass.updateMask(urbanClass); // Mask areas outside urban class
+    var urbanAreaInKm2 = maskedUrban.multiply(ee.Image.pixelArea().divide(1e6)); // Calculate area in km²
+    return urbanAreaInKm2.copyProperties(image, ['system:time_start', 'system:time_end']);
+  });
+
+// Generate a time-series chart of urban growth over time
+print(
+  ui.Chart.image.series(urbanCover, studyArea, ee.Reducer.sum(), 500, 'system:time_start')
+    .setOptions({
+      title: 'Urban Area Growth (2001-2024)',
+      hAxis: {title: 'Year'},
+      vAxis: {title: 'Urban Area (km²)'},
+      colors: ['#FF0000']
+    })
+);
+
+// 5. Step 2: Analyzing Air Quality (Aerosol Optical Depth) using MODIS AOD
+// Set the analysis time period
+var startTime = ee.Date('2001');
+var endTime = ee.Date('2024');
+var yearsDifference = endTime.difference(startTime, 'year').round();
+print(yearsDifference)
+
+// Load the MODIS Aerosol Optical Depth (AOD) dataset
+var aodCollection = ee.ImageCollection("MODIS/061/MCD19A2_GRANULES")
+  .select('Optical_Depth_047')
+  .filterDate(startTime, endTime)
+  .filterBounds(studyArea);
+
+// Create a list of yearly intervals for processing AOD data
+var yearlyList = ee.List.sequence(0, yearsDifference.subtract(1), 1).map(function(delta) {
+  return startTime.advance(delta, 'year'); 
+// For each value of delta, the startTime (which is likely an ee.Date object) is "advanced" by delta years.
+});
+/*
+"ee.List.sequence(0, yearsDifference.subtract(1), 1)"
+
+ee.List.sequence(start, end, step) generates a sequence of numbers from start to end with a step size of step.
+Here, start is 0 and step is 1, so this will generate a list of consecutive integers.
+
+yearsDifference.subtract(1): This subtracts 1 from the total number of years (yearsDifference). 
+This ensures that the list goes from 0 to the last year in the sequence.
+
+For example, if yearsDifference is 5, the sequence would be [0, 1, 2, 3, 4], which corresponds to 5 years.
+*/
+
+
+/*
+                                            // Aerosol Optical Depth (AOD) //
+Aerosol Optical Depth (AOD) is a measure of how much light is scattered and absorbed by aerosols in the atmosphere. 
+Aerosols are tiny particles suspended in the air, such as dust, smoke, sea salt, and pollution particles. 
+AOD is a dimensionless quantity that represents the attenuation of sunlight as it passes through the atmosphere.
+*/
+
+// Calculate the frequency of high AOD events (>0.5) per year
+var highAODFrequency = ee.ImageCollection(yearlyList.map(function(date) {
+  var start = ee.Date(date);
+  var end = start.advance(1, 'year');
+  var yearlyAOD = aodCollection.filterDate(start, end).map(function(image) {
+    var aodScaled = image.multiply(0.001); // Convert AOD values to proper scale
+    var highAODMask = aodScaled.gt(0.5); // Threshold for high AOD (poor air quality)
+    return highAODMask;
+  }).sum(); // Sum of high AOD occurrences for the year
+  return yearlyAOD
+    .set('system:time_start', start.millis())
+    .set('system:time_end', end.millis())
+    .set('system:index', start.format('YYYY-MM-dd'));
+}));
+
+// Generate a time-series chart of high AOD events per year
+print(
+  ui.Chart.image.series(highAODFrequency, studyArea, ee.Reducer.mean(), 1000, 'system:time_start')
+    .setOptions({
+      title: 'High AOD Frequency (2001-2023)',
+      hAxis: {title: 'Year'},
+      vAxis: {title: 'Mean High AOD Events (Poor Air Quality)'},
+      colors: ['#ff7f0e']
+    })
+);
+
+// 6. Step 3: Export the AOD Frequency Data to Google Drive
+Export.image.toDrive({
+  image: highAODFrequency.toBands().clip(studyArea).float(),
+  description: 'High_AOD_Frequency',
+  scale: 1000,
+  region: studyArea,
+  crs: 'EPSG:4326',
+  folder: 'Urban_AirQuality'
+});
